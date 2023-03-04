@@ -1,0 +1,49 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- none
+
+parameters:
+  - name: clusterName 
+    displayName: Cluster Name
+    type: string
+    default: aksab84
+  - name: resourceGroup
+    displayName: Resource Group
+    type: string
+    default: K6AKS.RG
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- task: AzureCLI@2
+  displayName: Get AKS credentials
+  inputs:
+    azureSubscription: 'jovadker-MCAPS-FDPO-Subscription'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+       # Fails the AzureCLI task if the below deployment script fails
+       set -e
+       az aks get-credentials -n ${{ parameters.clusterName }} -g ${{ parameters.resourceGroup }} --admin
+
+- script: |
+    git clone --branch v0.0.8 https://github.com/grafana/k6-operator
+    cd k6-operator
+    make deploy    
+  displayName: 'Install K6 operator'
+
+- task: AzureCLI@2
+  displayName: Configure own configmap for Prometheus server (AKS Monitoring Insights support)
+  inputs:
+    azureSubscription: 'jovadker-MCAPS-FDPO-Subscription'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+       # Fails the AzureCLI task if the below deployment script fails
+       set -e
+       kubectl apply -f ./k6/container-azm-ms-agentconfig.yaml

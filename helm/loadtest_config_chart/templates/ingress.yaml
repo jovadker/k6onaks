@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: reporter
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    cert-manager.io/acme-challenge-type: http01
+    appgw.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+ tls:
+ - hosts:
+   - {{ .Values.host }}
+   secretName: grafana-secret-name
+ rules:
+ - host: {{ .Values.host }}
+   http:
+    paths:
+    - path: /
+      backend:
+       service: 
+        name: reporter
+        port:
+         number: {{ .Values.service.reporter.port }}
+      pathType: Prefix

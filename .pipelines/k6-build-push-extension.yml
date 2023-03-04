@@ -1,0 +1,41 @@
+trigger:
+- none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+  - name: containerRegistry 
+    displayName: Container Registry
+    type: string
+    default: k6fdpoacr
+  - name: resourceGroup
+    displayName: Resource Group
+    type: string
+    default: K6AKS.RG
+
+steps:
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'jovadker-MCAPS-FDPO-Subscription'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+     set -e
+     echo "Start building dockerfile"
+     cd k6/xk6-prometheus
+     # $(Build.BuildId)
+     az acr build -g ${{ parameters.resourceGroup }} --registry ${{ parameters.containerRegistry }} --image k6/xk6-influxdb:latest .
+  displayName: Build and push influxdb extension
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'jovadker-MCAPS-FDPO-Subscription'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+     set -e
+     echo "Start building dockerfile"
+     cd k6/xk6-prometheus
+     # $(Build.BuildId)
+     az acr build -g ${{ parameters.resourceGroup }} --registry ${{ parameters.containerRegistry }} --image k6/xk6-prometheus-remote:latest .
+  displayName: Build and push prometheus-remote extension

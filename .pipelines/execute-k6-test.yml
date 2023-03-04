@@ -1,0 +1,193 @@
+trigger:
+- none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  location: 'westeurope'
+  namespace: 'k6test'
+  resultsDirectory: 'k6results'
+  k6podname: 'k6-sample'
+  nodepool: agentpool
+
+parameters:
+  - name: k6testfile
+    default: "./k6/test.js"
+    displayName: k6 test filepath
+  
+  - name: parallelism
+    type: number
+    displayName: "Number of pods to spawn, k6 recommends 120 VU / pod"
+    default: 4
+  
+  - name: virtualUsers
+    type: string
+    displayName: "Virtual users"
+    default: 100
+  
+  - name: rampUpTime
+    type: number
+    displayName: "Ramp up time"
+    default: 1
+
+  - name: duration
+    type: number
+    displayName: "Duration"
+    default: 1
+
+  - name: serverCount
+    type: number
+    default: 2
+    displayName: Number of nodes (serverCount)
+
+  - name: clusterName 
+    displayName: Cluster Name
+    type: string
+    default: aksab84
+
+  - name: resourceGroup
+    displayName: Resource Group
+    type: string
+    default: K6AKS.RG
+
+jobs:
+  - job: ExecuteTest
+    steps:
+    - bash: |
+        durationInMin=${{parameters.duration}}
+        echo "Duration in minutes: $durationInMin"
+        echo "##vso[task.setvariable variable=durationInMin]$durationInMin"
+        rampupInMin=${{parameters.rampUpTime}}
+        echo "##vso[task.setvariable variable=rampupInMin]$rampupInMin"
+        echo "Ramp up in minutes: $rampupInMin"
+        # based on specification timeout is duration+rampup+15 mins
+        timeoutFloat=$(echo "$durationInMin+$rampupInMin+15" | bc)
+        timeout=$(printf %.0f $timeoutFloat)
+        echo "Timeout: $timeout"
+        echo "##vso[task.setvariable variable=timeout]$timeout"
+      displayName: Calculate timeout
+
+    - task: Bash@3
+      displayName: Substitute stage parameters
+      inputs:
+        targetType: inline
+        script: |
+           # echo "##vso[task.setvariable variable=spec.arguments]--out influxdb=http://jmeter-influxdb.default.svc.cluster.local:8086/k6db --stage 2m:12,1m:0"
+           #sed -i -e 's/stage 2m:10,1m:0/stage 1m:12,1m:4/g' ./k6/test.yaml
+           sed -i -e 's/stage 2m:10,1m:0/stage $(rampupInMin)m:${{parameters.virtualUsers}},$(durationInMin)m:${{parameters.virtualUsers}}/g' ./k6/test.yaml
+           sed -i -re 's/(parallelism: )4/\1${{parameters.parallelism}}/g' ./k6/test.yaml
+
+    - task: Bash@3
+      displayName: Check yaml file
+      inputs:
+        targetType: inline
+        script: |
+           cat ./k6/test.yaml
+
+    - task: AzureCLI@2
+      displayName: Execute distributed K6 test through K6-Operator
+      inputs:
+       azureSubscription: 'jovadker-MCAPS-FDPO-Subscription'
+       scriptType: 'bash'
+       scriptLocation: 'inlineScript'
+       inlineScript: |
+        # Fails the AzureCLI task if the below deployment script fails
+        set -e
+        az aks get-credentials -n ${{ parameters.clusterName }} -g ${{ parameters.resourceGroup }} --admin
+        
+        currentCount=$(az aks nodepool show --cluster-name ${{ parameters.clusterName }} \
+                      --name $(nodepool) \
+                      --resource-group ${{ parameters.resourceGroup }} | jq '.count')
+
+        echo "Requested server count ${{parameters.serverCount}}, current server count $currentCount"
+
+        # if the requested node count is greater than current node count
+        if [ "${{parameters.serverCount}}" -gt "$currentCount" ]; then
+          echo "Scale out required"
+
+          az aks nodepool update \
+          --resource-group ${{ parameters.resourceGroup }} \
+          --cluster-name ${{ parameters.clusterName }} \
+          --name $(nodepool) \
+          --disable-cluster-autoscaler
+
+          az aks nodepool scale --cluster-name ${{ parameters.clusterName }} \
+                    --name $(nodepool) \
+                    --resource-group ${{ parameters.resourceGroup }} \
+                    --node-count ${{parameters.serverCount}}
+        fi
+
+
+        kubectl create namespace $(namespace) --dry-run=client -o yaml | kubectl apply -f -       
+        cp ${{parameters.k6testfile}} $(System.DefaultWorkingDirectory)/test.js
+
+        # Create or update config map
+        kubectl create configmap crocodile-stress-test --from-file $(System.DefaultWorkingDirectory)/test.js --namespace $(namespace) --dry-run=client -o yaml | kubectl apply -f -       
+        kubectl apply -f ./k6/test.yaml --namespace $(namespace)
+        while true; do
+         sleep 5
+         k6sample=`kubectl get pods -n $(namespace) --field-selector=status.phase=Running | grep "$(k6podname)-1"|awk '{print $1}'`
+         if [ -z "$k6sample" ]; then 
+           echo "waiting for $(k6podname) pod"
+         else 
+           echo "$(k6podname) pod is found: $k6sample"
+           break 
+         fi
+        done
+        
+        kubectl wait --for=condition=complete --timeout=3000s job/k6-sample-1 -n $(namespace)
+        
+        # Define loop to  iterate the array values
+        k6pods=$(kubectl get pods --namespace=$(namespace) | grep k6 | cut -d' ' -f1)
+       
+        # Collect results
+        mkdir $(Build.ArtifactStagingDirectory)/$(resultsDirectory)
+       
+        for pod in $k6pods
+        do   
+         echo "K6 pod name: $pod"
+         kubectl logs $pod -n $(namespace) >> $pod.json
+         cp ./$pod.json $(Build.ArtifactStagingDirectory)/$(resultsDirectory)/$pod.json
+        done
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)/$(resultsDirectory)'
+        ArtifactName: '$(resultsDirectory)'
+        publishLocation: 'Container'
+
+    - task: AzureCLI@2
+      enabled: true
+      condition: always()
+      displayName: Cleanup resources
+      inputs:
+       azureSubscription: 'jovadker-MCAPS-FDPO-Subscription'
+       scriptType: 'bash'
+       scriptLocation: 'inlineScript'
+       inlineScript: |
+        # Fails the AzureCLI task if the below deployment script fails
+        set -e
+        az aks get-credentials -n ${{ parameters.clusterName }} -g ${{ parameters.resourceGroup }} --admin
+        # kubectl delete k6 k6-sample -n k6test
+        kubectl delete -f ./k6/test.yaml --namespace $(namespace)
+        # wait for completion of delete
+        while true; do
+         k6crd=`kubectl get k6 -n $(namespace) | grep k6 | awk '{print $1}'`
+         if [ -z "$k6crd" ]; then 
+           echo "CRD $k6crd is deleted"
+           break
+         else 
+           echo "waiting for deleting crd $k6crd" 
+         fi
+         sleep 5
+        done
+        # Wait for additional 10 secs
+        sleep 10
+        #Scale testpool down to 2
+        #az aks nodepool update \
+        #  --resource-group $(resourcegroup) \
+        #  --cluster-name $(clustername) \
+        #  --name $(nodepool) \
+        #  --enable-cluster-autoscaler \
+        #  --min-count 2 \
+        #  --max-count 2

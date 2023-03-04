@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reporting
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: reporter
+  template:
+    metadata:
+      labels:
+        app: reporter
+    spec:
+      containers:
+        - name: reporter
+          image: {{ .Values.images.reporter.imageName }}
+          imagePullPolicy: IfNotPresent
+          command: [ "/bin/bash", "-c", "--" ]
+          args: [ "chown grafana /var/lib/grafana; chgrp grafana /var/lib/grafana;chown influxdb /var/lib/influxdb; chgrp influxdb /var/lib/influxdb;service influxdb start;service grafana-server start;while true; do sleep 30; done;" ]
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8G
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/influxdb
+            - name: influx-volume
+              mountPath: /var/lib/influxdb
+            - name: grafana-volume
+              mountPath: /var/lib/grafana
+          ports:
+            - containerPort: 3000
+            - containerPort: 8086
+              name: api
+      volumes:
+      - name: config-volume
+        configMap:
+         name: influxdb-config
+      - name: influx-volume
+        persistentVolumeClaim:
+          claimName: azure-influx-disk
+      - name: grafana-volume
+        persistentVolumeClaim:
+          claimName: azure-grafana-disk
+      tolerations:
+      - key: "sku"
+        operator: "Equal"
+        value: "LoadTesting"
+        effect: "NoSchedule"
+      {{- if .Values.nodeSelector }}
+      nodeSelector: {{- .Values.nodeSelector | toYaml | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,49 @@
+﻿--- 
+affinity: {}
+fullnameOverride: ""
+imagePullSecrets: []
+images: 
+  reporter: 
+    imageName: "jmetertesfwkacr.azurecr.io/testframework/reporter:latest"
+ingress: 
+  annotations: {}
+  enabled: false
+  hosts: 
+    - 
+      host: chart-example.local
+      paths: []
+  tls: []
+nameOverride: ""
+#set this to specify the nodepool
+nodeSelector: {
+  "environment": "testpool"
+}
+podSecurityContext: {}
+pvc: 
+  grafanaDiskName: azure-grafana-disk
+  influxDiskName: azure-influx-disk
+  grafanaDiskSize: 10Gi
+  influxDiskSize: 64Gi
+  volumeAccessMode: ReadWriteOnce
+replicaCount: 1
+resources: {}
+securityContext: {}
+service:
+  azureegressip: 23.97.150.35
+  jmeterinfluxdb: 
+    apiPort: 8086
+    graphitePort: 2003
+    httpPort: 8083
+    type: ClusterIP
+    externalRanges: [0.0.0.0/0, 2.2.2.2/32]
+  reporter: 
+    label: "app: reporter"
+    port: 3000
+    selector: "app: reporter"
+    type: ClusterIP
+serviceAccount: 
+  create: true
+  name: ~
+tolerations: []
+applicationInsightsInstrumentationKey: "4459031d-c0d4-4554-b847-89c8d7b4b861"
+host: "xy.westus3.cloudapp.azure.com"

@@ -1,0 +1,635 @@
+{
+   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+   "contentVersion": "1.0.0.0",
+   "parameters": {
+      "virtualNetworkAddressPrefix": {
+         "defaultValue": "10.0.0.0/8",
+         "type": "string",
+         "metadata": {
+            "description": "Containers DNS server IP address."
+         }
+      },
+      "aksSubnetAddressPrefix": {
+         "defaultValue": "10.0.0.0/16",
+         "type": "string",
+         "metadata": {
+            "description": "Containers DNS server IP address."
+         }
+      },
+      "applicationGatewaySubnetAddressPrefix": {
+         "defaultValue": "10.1.0.0/16",
+         "type": "string",
+         "metadata": {
+            "description": "Containers DNS server IP address."
+         }
+      },
+      "aksDnsPrefix": {
+         "defaultValue": "aks",
+         "type": "string",
+         "metadata": {
+            "description": "Optional DNS prefix to use with hosted Kubernetes API server FQDN."
+         }
+      },
+      "aksAgentOsDiskSizeGB": {
+         "defaultValue": 40,
+         "minValue": 30,
+         "maxValue": 1023,
+         "type": "int",
+         "metadata": {
+            "description": "Disk size (in GB) to provision for each of the agent pool nodes. This value ranges from 30 to 1023."
+         }
+      },
+      "aksAgentCount": {
+         "defaultValue": 3,
+         "minValue": 1,
+         "maxValue": 5,
+         "type": "int",
+         "metadata": {
+            "description": "The number of agent nodes for the cluster."
+         }
+      },
+      "aksAgentMinCount": {
+         "defaultValue": 1,
+         "type": "int",
+         "metadata": {
+            "description": "Min node number for auto scaling"
+         }
+      },
+      "aksAgentMaxCount": {
+         "defaultValue": 5,
+         "type": "int",
+         "metadata": {
+            "description": "Min node number for auto scaling"
+         }
+      },
+      "aksSystemAgentMinCount": {
+         "defaultValue": 1,
+         "type": "int",
+         "metadata": {
+            "description": "Min node number for auto scaling"
+         }
+      },
+      "aksSystemAgentMaxCount": {
+         "defaultValue": 5,
+         "type": "int",
+         "metadata": {
+            "description": "Min node number for auto scaling"
+         }
+      },
+      "aksAgentVMSize": {
+         "defaultValue": "Standard_DS3_v2",
+         "allowedValues": [
+            "Standard_D8s_v4",
+            "Standard_DS2_v2",
+            "Standard_DS3_v2",
+            "Standard_DS4_v2",
+            "Standard_D4s_v3",
+            "Standard_DS5_v2",
+            "Standard_D8s_v3",
+            "Standard_D16s_v3",
+            "Standard_D32s_v3",
+            "Standard_D48s_v3",
+            "Standard_D64s_v3"
+         ],
+         "type": "string",
+         "metadata": {
+            "description": "The size of the Virtual Machine."
+         }
+      },
+      "aksSystemAgentVMSize": {
+         "defaultValue": "Standard_D2_v3",
+         "type": "string",
+         "metadata": {
+            "description": "The size of the Virtual Machine."
+         }
+      },
+      "aksSystemAgentCount": {
+         "defaultValue": 3,
+         "minValue": 1,
+         "maxValue": 5,
+         "type": "int",
+         "metadata": {
+            "description": "The number of agent nodes for the cluster."
+         }
+      },
+      "kubernetesVersion": {
+         "defaultValue": "1.24.6",
+         "type": "string",
+         "metadata": {
+            "description": "The version of Kubernetes."
+         }
+      },
+      "aksServiceCIDR": {
+         "defaultValue": "10.2.0.0/16",
+         "type": "string",
+         "metadata": {
+            "description": "A CIDR notation IP range from which to assign service cluster IPs."
+         }
+      },
+      "aksDnsServiceIP": {
+         "defaultValue": "10.2.0.10",
+         "type": "string",
+         "metadata": {
+            "description": "Containers DNS server IP address."
+         }
+      },
+      "aksDockerBridgeCIDR": {
+         "defaultValue": "172.17.0.1/16",
+         "type": "string",
+         "metadata": {
+            "description": "A CIDR notation IP for Docker bridge."
+         }
+      },
+      "aksEnableRBAC": {
+         "type": "bool",
+         "defaultValue": true,
+         "metadata": {
+            "description": "Enable RBAC on the AKS cluster."
+         }
+      },
+      "applicationGatewaySku": {
+         "defaultValue": "WAF_v2",
+         "allowedValues": [
+            "Standard_v2",
+            "WAF_v2"
+         ],
+         "type": "string",
+         "metadata": {
+            "description": "The sku of the Application Gateway. Default: WAF_v2 (Detection mode). In order to further customize WAF, use azure portal or cli."
+         }
+      },
+      "acrName": {
+         "type": "string",
+         "minLength": 5,
+         "maxLength": 50,
+         "metadata": {
+            "description": "Name of your Azure Container Registry"
+         }
+      },
+      "acrAdminUserEnabled": {
+         "type": "bool",
+         "defaultValue": false,
+         "metadata": {
+            "description": "Enable admin user that have push / pull permission to the registry."
+         }
+      },
+      "acrSku": {
+         "type": "string",
+         "metadata": {
+            "description": "Tier of your Azure Container Registry."
+         },
+         "defaultValue": "Basic",
+         "allowedValues": [
+            "Basic",
+            "Standard",
+            "Premium"
+         ]
+      },
+      "applicationGatewayDNSPrefixName": {
+         "type": "string"
+      },
+      "grafanaAdminUserOrGroupID": {
+         "type": "string",
+         "metadata": {
+            "description": "The ID of the Azure Active Directory group or user that has admin rights to the Grafana instance."
+         }
+      }
+   },
+   "variables": {
+      "resgpguid": "[substring(replace(guid(resourceGroup().id), '-', ''), 0, 4)]",
+      "vnetName": "[concat('virtualnetwork' , variables('resgpguid'))]",
+      "applicationGatewayName": "[concat('applicationgateway' , variables('resgpguid'))]",
+      "applicationGatewayPublicIpName": "[concat('appgwpublicip' , variables('resgpguid'))]",
+      "kubernetesSubnetName": "kubesubnet",
+      "applicationGatewaySubnetName": "appgwsubnet",
+      "aksClusterName": "[concat('aks' , variables('resgpguid'))]",
+      "vnetId": "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+      "kubernetesSubnetId": "[concat(variables('vnetID'),'/subnets/', variables('kubernetesSubnetName'))]",
+      "applicationGatewaySubnetId": "[concat(variables('vnetID'),'/subnets/', variables('applicationGatewaySubnetName'))]",
+      "applicationGatewayPublicIpId": "[resourceId('Microsoft.Network/publicIPAddresses',variables('applicationGatewayPublicIpName'))]",
+      "applicationGatewayId": "[resourceId('Microsoft.Network/applicationGateways', variables('applicationGatewayName'))]",
+      "aksClusterId": "[resourceId('Microsoft.ContainerService/managedClusters', variables('aksClusterName'))]",
+      "contributorRole": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+      "readerRole": "[concat('/subscriptions/', subscription().subscriptionId, '/providers/Microsoft.Authorization/roleDefinitions/', 'acdd72a7-3385-48ef-bd42-f606fba81ae7')]",
+      "webApplicationFirewallConfiguration": {
+         "enabled": "true",
+         "firewallMode": "Detection"
+      },
+      "acrId": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+      "acrPullRoleDefinitionName": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
+      "acrPullRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPullRoleDefinitionName'))]",
+      "appInsightsName": "[concat('appinsights' , variables('resgpguid'))]",
+      "workspaceName": "[concat('workspace' , variables('resgpguid'))]",
+      "dashboardName": "[concat('dashboard' , variables('resgpguid'))]",
+      "grafanaAdminRoleDefinitionName": "22926164-76b3-42b3-bc55-97df8dab3e41",
+      "grafanaAdminRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('grafanaAdminRoleDefinitionName'))]"
+
+   },
+   "resources": [
+      {
+         "name": "[parameters('acrName')]",
+         "type": "Microsoft.ContainerRegistry/registries",
+         "apiVersion": "2019-12-01-preview",
+         "location": "[resourceGroup().location]",
+         "comments": "Container registry for storing docker images",
+         "tags": {
+            "displayName": "Container Registry",
+            "container.registry": "[parameters('acrName')]"
+         },
+         "sku": {
+            "name": "[parameters('acrSku')]",
+            "tier": "[parameters('acrSku')]"
+         },
+         "properties": {
+            "adminUserEnabled": "[parameters('acrAdminUserEnabled')]"
+         }
+      },
+      {
+         "type": "Microsoft.Network/virtualNetworks",
+         "name": "[variables('vnetName')]",
+         "apiVersion": "2018-08-01",
+         "location": "[resourceGroup().location]",
+         "properties": {
+            "addressSpace": {
+               "addressPrefixes": [
+                  "[parameters('virtualNetworkAddressPrefix')]"
+               ]
+            },
+            "subnets": [
+               {
+                  "name": "[variables('kubernetesSubnetName')]",
+                  "properties": {
+                     "addressPrefix": "[parameters('aksSubnetAddressPrefix')]"
+                  }
+               },
+               {
+                  "name": "[variables('applicationGatewaySubnetName')]",
+                  "properties": {
+                     "addressPrefix": "[parameters('applicationGatewaySubnetAddressPrefix')]"
+                  }
+               }
+            ]
+         }
+      },
+      {
+         "type": "Microsoft.Network/publicIPAddresses",
+         "name": "[variables('applicationGatewayPublicIpName')]",
+         "apiVersion": "2018-08-01",
+         "location": "[resourceGroup().location]",
+         "sku": {
+            "name": "Standard"
+         },
+         "properties": {
+            "publicIPAllocationMethod": "Static",
+            "dnsSettings": {
+               "domainNameLabel": "[parameters('applicationGatewayDNSPrefixName')]"
+            }
+         }
+      },
+      {
+         "type": "Microsoft.Network/applicationGateways",
+         "name": "[variables('applicationGatewayName')]",
+         "apiVersion": "2020-11-01",
+         "location": "[resourceGroup().location]",
+         "tags": {
+            "managed-by-k8s-ingress": "true"
+         },
+         "properties": {
+            "sku": {
+               "name": "[parameters('applicationGatewaySku')]",
+               "tier": "[parameters('applicationGatewaySku')]"
+            },
+            "autoscaleConfiguration": {
+               "maxCapacity": 2,
+               "minCapacity": 0
+            },
+            "gatewayIPConfigurations": [
+               {
+                  "name": "appGatewayIpConfig",
+                  "properties": {
+                     "subnet": {
+                        "id": "[variables('applicationGatewaySubnetId')]"
+                     }
+                  }
+               }
+            ],
+            "frontendIPConfigurations": [
+               {
+                  "name": "appGatewayFrontendIP",
+                  "properties": {
+                     "PublicIPAddress": {
+                        "id": "[variables('applicationGatewayPublicIpId')]"
+                     }
+                  }
+               }
+            ],
+            "frontendPorts": [
+               {
+                  "name": "httpPort",
+                  "properties": {
+                     "Port": 80
+                  }
+               },
+               {
+                  "name": "httpsPort",
+                  "properties": {
+                     "Port": 443
+                  }
+               }
+            ],
+            "backendAddressPools": [
+               {
+                  "name": "bepool",
+                  "properties": {
+                     "backendAddresses": [
+
+                     ]
+                  }
+               }
+            ],
+            "httpListeners": [
+               {
+                  "name": "httpListener",
+                  "properties": {
+                     "protocol": "Http",
+                     "frontendPort": {
+                        "id": "[concat(variables('applicationGatewayId'), '/frontendPorts/httpPort')]"
+                     },
+                     "frontendIPConfiguration": {
+                        "id": "[concat(variables('applicationGatewayId'), '/frontendIPConfigurations/appGatewayFrontendIP')]"
+                     }
+                  }
+               }
+            ],
+            "backendHttpSettingsCollection": [
+               {
+                  "name": "setting",
+                  "properties": {
+                     "port": 80,
+                     "protocol": "Http"
+                  }
+               }
+            ],
+            "requestRoutingRules": [
+               {
+                  "name": "rule1",
+                  "properties": {
+                     "httpListener": {
+                        "id": "[concat(variables('applicationGatewayId'), '/httpListeners/httpListener')]"
+                     },
+                     "backendAddressPool": {
+                        "id": "[concat(variables('applicationGatewayId'), '/backendAddressPools/bepool')]"
+                     },
+                     "backendHttpSettings": {
+                        "id": "[concat(variables('applicationGatewayId'), '/backendHttpSettingsCollection/setting')]"
+                     }
+                  }
+               }
+            ],
+            "webApplicationFirewallConfiguration": "[if(equals(parameters('applicationGatewaySku'), 'WAF_v2'), variables('webApplicationFirewallConfiguration'), json('null'))]"
+            
+         },
+         "dependsOn": [
+            "[concat('Microsoft.Network/virtualNetworks/', variables('vnetName'))]",
+            "[concat('Microsoft.Network/publicIPAddresses/', variables('applicationGatewayPublicIpName'))]"
+         ]
+      },
+      {
+         "type": "Microsoft.Network/applicationgateways/providers/roleAssignments",
+         "apiVersion": "2017-05-01",
+         "name": "[concat(variables('applicationGatewayName'), '/Microsoft.Authorization/', guid(resourceGroup().id, 'identityappgwaccess'))]",
+         "properties": {
+            "roleDefinitionId": "[variables('contributorRole')]",
+            "principalId": "[reference(variables('aksClusterId'), '2020-12-01', 'Full').properties.addonProfiles.ingressApplicationGateway.identity.objectId]",
+            "scope": "[variables('applicationGatewayId')]"  
+         },
+         "dependsOn": [
+               "[concat('Microsoft.Network/applicationgateways/', variables('applicationGatewayName'))]",
+               "[concat('Microsoft.ContainerService/managedClusters/', variables('aksClusterName'))]"
+         ]
+      },
+      {
+         "type": "Microsoft.Authorization/roleAssignments",
+         "apiVersion": "2017-05-01",
+         "name": "[guid(resourceGroup().id, 'identityrgaccess')]",
+         "properties": {
+            "roleDefinitionId": "[variables('readerRole')]",
+            "principalId": "[reference(variables('aksClusterId'), '2020-12-01', 'Full').properties.addonProfiles.ingressApplicationGateway.identity.objectId]",
+            "scope": "[resourceGroup().id]"
+         },
+          "dependsOn": [
+               "[concat('Microsoft.Network/applicationgateways/', variables('applicationGatewayName'))]",
+               "[concat('Microsoft.ContainerService/managedClusters/', variables('aksClusterName'))]"
+         ]
+      },
+      {
+         "type": "Microsoft.ContainerService/managedClusters",
+         "name": "[variables('aksClusterName')]",
+         "apiVersion": "2021-09-01",
+         "location": "[resourceGroup().location]",
+         "identity": {
+            "type": "SystemAssigned"
+         },
+         "properties": {
+            "kubernetesVersion": "[parameters('kubernetesVersion')]",
+            "enableRBAC": "[parameters('aksEnableRBAC')]",
+            "dnsPrefix": "[parameters('aksDnsPrefix')]",
+            "addonProfiles": {
+               "ingressApplicationGateway": {
+                  "config": {
+                     "applicationGatewayId": "[variables('applicationGatewayId')]"
+                  },
+                  "enabled": true
+               },
+               "omsagent": {
+                  "enabled": true,
+                  "config": {
+                     "logAnalyticsWorkspaceResourceID": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]"
+                  }
+               }     
+            },
+            "agentPoolProfiles": [
+               {
+                  "name": "agentpool",
+                  "osDiskSizeGB": "[parameters('aksAgentOsDiskSizeGB')]",
+                  "count": "[parameters('aksAgentCount')]",
+                  "vmSize": "[parameters('aksAgentVMSize')]",
+                  "type": "VirtualMachineScaleSets",
+                  "osType": "Linux",
+                  "storageProfile": "ManagedDisks",
+                  "enableAutoScaling": true,
+                  "minCount": "[parameters('aksAgentMinCount')]",
+                  "maxCount": "[parameters('aksAgentMaxCount')]",
+                  "vnetSubnetID": "[variables('kubernetesSubnetId')]",
+                  "dnsPrefix": "agents",
+                  "mode": "User",
+                  "nodeLabels": {
+                     "environment": "testpool"
+                  },
+                  "maxPods": 100
+               },
+               {
+                  "name": "systempool",
+                  "osDiskSizeGB": "[parameters('aksAgentOsDiskSizeGB')]",
+                  "count": "[parameters('aksSystemAgentCount')]",
+                  "enableAutoScaling": true,
+                  "minCount": "[parameters('aksSystemAgentMinCount')]",
+                  "maxCount": "[parameters('aksSystemAgentMaxCount')]",
+                  "vmSize": "[parameters('aksSystemAgentVMSize')]",
+                  "osType": "Linux",
+                  "vnetSubnetID": "[variables('kubernetesSubnetId')]",
+                  "storageProfile": "ManagedDisks",
+                  "dnsPrefix": "system",
+                  "mode": "System",
+                  "nodeTaints": [ "CriticalAddonsOnly=true:NoSchedule" ]
+               }
+            ],
+            "networkProfile": {
+               "networkPlugin": "azure",
+               "serviceCidr": "[parameters('aksServiceCIDR')]",
+               "dnsServiceIP": "[parameters('aksDnsServiceIP')]",
+               "dockerBridgeCidr": "[parameters('aksDockerBridgeCIDR')]",
+               "loadBalancerSku": "Standard",
+               "outboundType": "loadBalancer",
+               "loadBalancerProfile": {
+                  "managedOutboundIPs": {
+                     "count": 1
+                  }
+               }
+            }
+
+         },
+         "dependsOn": [
+            "[concat('Microsoft.Network/virtualNetworks/', variables('vnetName'))]",
+            "[concat('Microsoft.Network/applicationGateways/', variables('applicationGatewayName'))]",
+            "[concat('Microsoft.OperationalInsights/workspaces/', variables('workspaceName'))]"
+         ]
+      },
+      {
+         "type": "microsoft.insights/components",
+         "apiVersion": "2020-02-02",
+         "name": "[variables('appInsightsName')]",
+         "location": "[resourceGroup().location]",
+         "kind": "web",
+         "properties": {
+            "Application_Type": "web",
+            "Flow_Type": "Bluefield",
+            "Request_Source": "rest",
+            "RetentionInDays": 90,
+            "publicNetworkAccessForIngestion": "Enabled",
+            "publicNetworkAccessForQuery": "Enabled",
+            "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]"
+         },
+         "dependsOn": [
+            "[concat('Microsoft.OperationalInsights/workspaces/', variables('workspaceName'))]"
+         ]
+      },
+      {
+         "comments": "AcrPull assignment for AKS user assigned identity",
+         "type": "Microsoft.Authorization/roleAssignments",
+         "apiVersion": "2020-04-01-preview",
+         "name": "[guid(resourceGroup().id)]",
+         "scope": "[concat('Microsoft.ContainerRegistry/registries', '/', parameters('acrName'))]",
+         "dependsOn": [
+            "[variables('aksClusterId')]",
+            "[variables('acrId')]"
+         ],
+         "properties": {
+            "roleDefinitionId": "[variables('acrPullRoleId')]",
+            "principalId": "[reference(variables('aksClusterId'), '2020-12-01', 'Full').properties.identityProfile.kubeletidentity.objectId]",
+            "principalType": "ServicePrincipal"
+         }
+      },
+      {
+          "type": "Microsoft.OperationalInsights/workspaces",
+          "name": "[variables('workspaceName')]",
+          "apiVersion": "2020-08-01",
+          "location": "[resourceGroup().location]",
+          "properties": {
+              "sku": {
+                  "name": "pergb2018"
+              },
+              "retentionInDays": 30
+          }
+      },
+      {
+         "type": "Microsoft.Dashboard/grafana",
+         "apiVersion": "2021-09-01-preview",
+         "name": "[variables('dashboardName')]",
+         "location": "[resourceGroup().location]",
+         "properties": {        
+           "zoneRedundancy": "Disabled",
+            "autoGeneratedDomainNameLabelScope": "TenantReuse"
+         },
+        "sku": {
+            "name": "Standard"
+         },
+         "dependsOn": [
+            "[variables('aksClusterId')]"
+         ]
+       },
+       {
+         "comments": "Define Grafana admin",
+          "type": "Microsoft.Authorization/roleAssignments",
+          "apiVersion": "2020-04-01-preview",
+          "name": "[guid(resourceGroup().id, 'grafana')]",
+          "scope": "[resourceId('Microsoft.Dashboard/grafana', variables('dashboardName'))]",
+          "dependsOn": [
+            "[variables('aksClusterId')]",
+            "[variables('dashboardName')]"
+          ],
+          "properties": {
+            "roleDefinitionId": "[variables('grafanaAdminRoleId')]",
+            "principalId": "[parameters('grafanaAdminUserOrGroupID')]"
+          }
+       },
+       {
+         "comments": "AKS System assigned identity Contributor role for the whole ResourceGroup in order to be able to create ILBs",
+         "type": "Microsoft.Authorization/roleAssignments",
+         "apiVersion": "2020-04-01-preview",
+         "name": "[guid(resourceGroup().id, 'systemassigned')]",
+         "dependsOn": [
+            "[variables('aksClusterId')]"
+         ],
+         "properties": {
+            "roleDefinitionId": "[variables('contributorRole')]",
+            "principalId": "[reference(variables('aksClusterId'), '2020-12-01', 'Full').identity.principalId]",
+            "principalType": "ServicePrincipal"
+         }
+      }
+   ],
+   "outputs": {
+      "subscriptionId": {
+         "type": "string",
+         "value": "[subscription().subscriptionId]"
+      },
+      "resourceGroupName": {
+         "type": "string",
+         "value": "[resourceGroup().name]"
+      },
+      "applicationGatewayName": {
+         "type": "string",
+         "value": "[variables('applicationGatewayName')]"
+      },
+      "identityResourceId": {
+         "type": "string",
+         "value": "[reference(variables('aksClusterId'), '2020-12-01', 'Full').properties.identityProfile.kubeletidentity.objectId]"
+      },
+      "identityClientId": {
+         "type": "string",
+         "value": "[reference(variables('aksClusterId'), '2020-12-01', 'Full').properties.identityProfile.kubeletidentity.clientId]"
+      },
+      "aksApiServerAddress": {
+         "type": "string",
+         "value": "[reference(variables('aksClusterId'), '2018-03-31').fqdn]"
+      },
+      "aksClusterName": {
+         "type": "string",
+         "value": "[variables('aksClusterName')]"
+      },
+      "JMeterAppInsightsInstrumentationKey": {
+         "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2014-04-01').InstrumentationKey]",
+         "type": "string"
+      }
+   }
+}

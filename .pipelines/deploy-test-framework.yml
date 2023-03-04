@@ -1,0 +1,146 @@
+trigger:
+- none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  resourceGroup: K6AKS.RG
+  location: westeurope
+  containerRegistry: k6fdpoacr
+  containerRegistrySKU: Basic
+  AppGwPrefixName: k6fdpografana
+   # az ad user show --id "somebody@company.onmicrosoft.com" --query id --output tsv
+  grafanaAdminId: 1d1ddb46-XXX-YYYY-ZZZZ-879259ab8672
+  externalIPRanges: "[0.0.0.0/0, 1.1.1.1/32]"
+
+steps:
+- task: Bash@3
+  inputs:
+    targetType: 'inline'
+    script: |
+     set -e
+     # set image name variables for helm chart value substitution
+     echo "##vso[task.setvariable variable=images.reporter.imageName]$(containerRegistry).azurecr.io/testframework/reporter:$(Build.BuildId)"
+     echo "##vso[task.setvariable variable=version]$(Build.BuildId)"
+     # debug the previously declared variable values
+     echo $(images.reporter.imageName)
+     echo $(version)
+     # set external ip ranges in Helm chart values
+     echo "External IP ranges: $(externalIPRanges)"
+     sed -i "s|externalRanges: .*|externalRanges: $(externalIPRanges)|g" $(System.DefaultWorkingDirectory)/helm/loadtest_config_chart/values.yaml
+  displayName: "Set docker variables"
+
+- task: SubstituteVariables@1
+  inputs:
+    files: |
+      $(System.DefaultWorkingDirectory)/helm/loadtest_config_chart/values.yaml
+      $(System.DefaultWorkingDirectory)/helm/loadtest_config_chart/Chart.yaml
+  displayName: "Substitute variables"
+
+- task: Bash@3
+  inputs:
+    targetType: 'inline'
+    script: |
+      # Write your commands here
+      echo "Display generated values.yaml..."
+      cat $(System.DefaultWorkingDirectory)/helm/loadtest_config_chart/values.yaml
+      echo "Display generated Chart.yaml ////////////////////////////////////////////////////////"
+      cat $(System.DefaultWorkingDirectory)/helm/loadtest_config_chart/Chart.yaml
+  displayName: "Check substituted variables"
+
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'jovadker-MCAPS-FDPO-Subscription'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+     set -e
+     echo "Start incrementally deploying infrastructure"
+     now=$(date +'%Y%m%d-%H%M')
+     deploymentName=infrastructureDeployment_$now
+     az group create --name $(resourceGroup) --location $(location)
+     az deployment group create --name $deploymentName -g $(resourceGroup) --template-file ./arm/infrastructure_deployment.json \
+        --parameters acrName=$(containerRegistry) acrAdminUserEnabled=false acrSku=$(containerRegistrySKU) applicationGatewayDNSPrefixName=$(AppGwPrefixName) \
+            grafanaAdminUserOrGroupID=$(grafanaAdminId)
+     
+     echo "Parsing ARM output"
+     echo "Deployment name: $deploymentName"
+     armOutput=$(az deployment group show --name $deploymentName \
+      --resource-group $(resourceGroup) \
+      --query properties.outputs)
+     echo "ARM output:"
+     echo $armOutput
+     
+     var=$armOutput    
+     echo "After Sed commands": $var
+     subscriptionId=$(echo $var | jq -r .subscriptionId.value)
+     resourceGroupName=`echo $var | jq -r .resourceGroupName.value`
+     applicationGatewayName=`echo $var | jq -r .applicationGatewayName.value`
+     identityResourceId=`echo $var | jq -r .identityResourceId.value`
+     identityClientId=`echo $var | jq -r .identityClientId.value`
+     aksApiServerAddress=`echo $var | jq -r .aksApiServerAddress.value`
+     aksClusterName=`echo $var | jq -r .aksClusterName.value`
+     appInsightsKey=`echo $var | jq -r .jMeterAppInsightsInstrumentationKey.value`
+     echo "AKS cluster name: $aksClusterName"
+     echo "##vso[task.setvariable variable=appgw.subscriptionId]$subscriptionId"
+     echo "##vso[task.setvariable variable=appgw.resourceGroup]$resourceGroupName"
+     echo "##vso[task.setvariable variable=appgw.name]$applicationGatewayName"
+     echo "##vso[task.setvariable variable=armAuth.identityResourceID]$identityResourceId"
+     echo "##vso[task.setvariable variable=armAuth.identityClientID]$identityClientId"
+     echo "##vso[task.setvariable variable=aksApiServerAddress]$aksApiServerAddress"
+     echo "##vso[task.setvariable variable=aksClusterName]$aksClusterName"
+     echo "##vso[task.setvariable variable=applicationInsightsInstrumentationKey]$appInsightsKey"
+     echo "##vso[task.setvariable variable=rbac.enabled]true"
+     # set appgateway host name for helm chart
+     hostName=$(AppGwPrefixName).$(location).cloudapp.azure.com
+     echo "Host name: $hostName"
+     echo "##vso[task.setvariable variable=host]$hostName"
+     # set external ip ranges in Helm chart values
+     echo "External IP ranges: $(externalIPRanges)"
+     sed -i "s|externalRanges: .*|externalRanges: $(externalIPRanges)|g" $(System.DefaultWorkingDirectory)/helm/loadtest_config_chart/values.yaml
+  displayName: Deploy IaC
+  enabled: true
+- task: SubstituteVariables@1
+  inputs:
+    files: '$(System.DefaultWorkingDirectory)/helm/loadtest_config_chart/values.yaml'
+  displayName: "Substitute variables"
+
+- task: Bash@3
+  inputs:
+    targetType: 'inline'
+    script: |
+      # Write your commands here
+      echo "Display generated values.yaml..."
+      cat $(System.DefaultWorkingDirectory)/helm/loadtest_config_chart/values.yaml
+  displayName: "Check substituted variables"
+
+
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'jovadker-MCAPS-FDPO-Subscription'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+     set -e
+     echo "Start building dockerfile"
+     cd docker/reporter
+     az acr build -g $(resourceGroup) --registry $(containerRegistry) --image testframework/reporter:$(Build.BuildId) .
+  displayName: Build reporter image
+
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'jovadker-MCAPS-FDPO-Subscription'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+     set -e
+     sudo chmod +x $(System.DefaultWorkingDirectory)/deployment/deploy_test_k6_framework.sh
+     sudo chmod +x $(System.DefaultWorkingDirectory)/deployment/postdeployment.sh
+     sudo chmod +x $(System.DefaultWorkingDirectory)/deployment/installcertmanager.sh
+     # install cert manager
+     $(System.DefaultWorkingDirectory)/deployment/installcertmanager.sh $(aksClusterName) $(resourceGroup)
+     $(System.DefaultWorkingDirectory)/deployment/deploy_test_k6_framework.sh $(aksClusterName) $(resourceGroup) $(System.DefaultWorkingDirectory)          
+
+     $(System.DefaultWorkingDirectory)/deployment/postdeployment.sh $(System.DefaultWorkingDirectory)
+  displayName: Install test framework helm charts

@@ -1,0 +1,10 @@
+{
+  "name": "k6db",
+  "type": "influxdb",
+  "url": "http://localhost:8086",
+  "access": "proxy",
+  "isDefault": true,
+  "database": "k6db",
+  "user": "admin",
+  "password": "admin"
+}

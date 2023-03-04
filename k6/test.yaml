@@ -1,0 +1,38 @@
+---
+apiVersion: k6.io/v1alpha1
+kind: K6
+metadata:
+  name: k6-sample
+  annotations: 
+   prometheus.io/scrape: 'true'
+   prometheus.io/port: '5656'
+spec:
+  parallelism: 4
+  script:
+    configMap:
+      name: "crocodile-stress-test"
+      file: "test.js" 
+  ports:
+  - containerPort: 5656
+    name: metrics
+  arguments: 
+    --out influxdb=http://jmeter-influxdb.framework.svc.cluster.local:8086/k6db 
+    --stage 2m:10,1m:0
+  runner:
+    image: k6fdpoacr.azurecr.io/k6/xk6-influxdb:latest
+    resources:
+      limits:
+        cpu: 200m
+        memory: 1000Mi
+      requests:
+        cpu: 100m
+        memory: 500Mi
+    metadata:
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '5656'
+   
+  #runner:
+  #arguments: --out prometheus
+  #  image: jovadkeracr.azurecr.io/k6/xk6-prometheus:latest
+  
